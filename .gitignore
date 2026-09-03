@@ -1,0 +1,12 @@
+# 依赖 / 虚拟环境
+node_modules/
+.venv/
+__pycache__/
+
+# 工具状态 / 日志
+.mimosa/
+*.log
+
+# 系统杂项
+.DS_Store
+Thumbs.db

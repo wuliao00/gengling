@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#FFF3D9" />
+<title>梗灵大陆</title>
+<link rel="stylesheet" href="css/game.css" />
+<link rel="stylesheet" href="css/cartoon.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶部资源栏（战斗场景自动隐藏） -->
+  <header id="topbar">
+    <div class="res-chip chip-energy" title="体力">
+      <i class="ico-bolt"></i><b id="tbEnergy">--</b>
+    </div>
+    <div class="res-chip chip-gold" title="金币">
+      <i class="ico-coin"></i><b id="tbGold">--</b>
+    </div>
+    <div class="topbar-title" id="tbTitle">梗灵大陆</div>
+  </header>
+
+  <!-- 七大场景：内容由 js/ui/scenes.js 动态填充 -->
+  <div class="scene" id="scene-home"></div>
+  <div class="scene" id="scene-map"></div>
+  <div class="scene" id="scene-lineup"></div>
+
+  <div class="scene" id="scene-battle">
+    <!-- 唯一的棋盘画布，由 render.js 渲染、input.js 接管指针 -->
+    <canvas id="board"></canvas>
+  </div>
+
+  <div class="scene" id="scene-result"></div>
+  <div class="scene" id="scene-chars"></div>
+  <div class="scene" id="scene-shop"></div>
+
+</div>
+<div id="toast-root"></div>
+<div id="modal-root"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
