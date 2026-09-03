@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.wuliao00.gengling'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.wuliao00.gengling"
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 把仓库根目录的 H5 游戏（index.html / css / js / assets）打包进 APK 的 assets，实现离线可玩
+    sourceSets {
+        main {
+            assets.srcDir "$buildDir/generated/web"
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+}
+
+// 构建前把 H5 游戏文件复制进 assets 暂存目录（单一数据源：仓库根目录）
+tasks.register('copyWeb', Copy) {
+    def webRoot = rootProject.projectDir.parentFile   // gengling/（android/ 的上一级）
+    from(webRoot) {
+        include 'index.html'
+        include 'css/**'
+        include 'js/**'
+        include 'assets/**'
+    }
+    into "$buildDir/generated/web"
+}
+
+preBuild.dependsOn copyWeb
