@@ -1,0 +1,20 @@
+梗灵大陆 · 发布包说明
+======================
+
+一、安卓 APK（gengling-release.apk / 仓库 release/app-release.apk）
+  - 已签名的 release 包（GitHub Actions 云端构建，密钥存于仓库 Secrets，不入库）。
+  - 安装：传到手机 → 允许"安装未知应用" → 安装。竖屏、离线可玩。
+  - 包名 com.wuliao00.gengling。
+
+二、网页版（gengling-web.zip）
+  - 解压后是完整可部署的 H5（index.html 在根目录）。
+  - 部署方式任选：
+    1) 直接双击 index.html 本地玩（部分浏览器 ES Module 需 http，建议用方式2/3）；
+    2) 放到任意静态托管 / 网盘分享后解压打开；
+    3) 已上线 PWA：https://wuliao00.github.io/gengling/ （HTTPS，可"添加到主屏幕"离线玩）。
+  - 重新打包：双击桌面《一键打包网页版.bat》，会在同目录生成最新 gengling-web.zip。
+
+三、更新流程
+  - 改代码后 git push 到 main：GitHub Actions 自动重建 APK（Actions → Artifacts 下载），
+    GitHub Pages 自动更新网页版。
+  - 本发布包内的 APK/zip 为推送时点产物；要最新请重新下载/重新跑 bat。
