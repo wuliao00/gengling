@@ -240,6 +240,12 @@ export class Board {
     }
   }
 
+  // 收尾清理：管线结束后若仍残留可消除匹配（极端情况），继续消除直到无匹配，
+  // 保证棋盘不会停着"三个同色没消"的活匹配。无匹配时返回空 events。
+  settle() {
+    return this._pipeline([], null, null, null, null);
+  }
+
   // 气流（V2.1）：随机选 1 列，该列顶部 n 个非 chain 格被直接吹走
   //（不计入 matchedCounts、不计玩家消除分），随后走既有重力+补充+连锁管线。
   applyWind(n = 3) {

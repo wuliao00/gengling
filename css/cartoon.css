@@ -472,6 +472,19 @@ body {
 .item-btn { min-width: 44px; min-height: 38px; font-size: 12px; padding: 4px 8px; }
 .item-btn b { font-size: 11px; }
 
+/* 道具栏换行居中，避免横排溢出被左右裁切 */
+.bt-items { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+.item-btn { font-size: 11px; padding: 4px 7px; min-width: 40px; }
+
+/* 开发者密码输入框 */
+.dev-pwd {
+  width: 100%; margin: 6px 0 2px; padding: 10px 14px;
+  border: 2.5px solid #FFE3B3; border-radius: 14px;
+  background: #FFFBF0; font-size: 16px; font-family: inherit; color: #5A3A20;
+  text-align: center; letter-spacing: 2px;
+}
+.dev-pwd:focus { outline: none; border-color: #FFD23F; }
+
 /* ===== V5.2 交互修复：弹窗换行/色块、自动战斗按钮、招式名标签、角色详情 ===== */
 /* 颜色转换瓶等多按钮弹窗：换行 + 可滚动，避免内容被挤出/遮挡 */
 .modal-box { max-height: 88vh; overflow-y: auto; }

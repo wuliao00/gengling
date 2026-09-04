@@ -143,7 +143,7 @@ export const Scenes = {
     };
     // V5 开发者面板
     const devBtn = document.getElementById('btnDev');
-    if (devBtn) devBtn.onclick = () => openDevPanel(this);
+    if (devBtn) devBtn.onclick = () => askDevPassword(() => openDevPanel(this));
     drawLogo(document.getElementById('homeLogo'), 320, 150);
     drawAvatarInto(document.getElementById('homeMascot'), 'hajimiao', 120);
     const s0 = Meta.get();
@@ -332,7 +332,6 @@ export const Scenes = {
       <div class="bt-wrap">
         <div class="bt-top">
           <div class="bt-enemies" id="btEnemies"></div>
-          <button class="bt-auto" id="btAuto">⚡自动:关</button>
           <button class="bt-pause" id="btPause">⏸</button>
         </div>
         <div class="bt-goalbar">
@@ -375,14 +374,6 @@ export const Scenes = {
     // 敌人卡
     this.rebuildEnemies();
     if (g.battle.state.enemies.length === 0) document.getElementById('btEnemies').innerHTML = '<div class="ec-none">🕊 无敌人 · 完成目标即可通关</div>';
-
-    // 自动战斗按钮（初始状态同步）
-    const ab = document.getElementById('btAuto');
-    if (ab) {
-      ab.classList.toggle('on', !!g.auto);
-      ab.textContent = g.auto ? '⚡自动:开' : '⚡自动:关';
-      ab.onclick = () => g.toggleAuto();
-    }
 
     // 技能按钮（头像 + 招式名标签，点击释放主动技能）
     const sk = document.getElementById('btSkills');
@@ -758,19 +749,44 @@ export const Scenes = {
 };
 
 // ============ V5 开发者模式 ============
-// 开启方式：URL ?dev=1（持久化）或连续点 5 次顶栏标题
+// 开启方式：URL ?dev=1（持久化）或连续点 5 次顶栏标题显示入口；进入面板需密码。
+let _devUnlocked = false;
+const DEV_PASSWORD = 'gengling2026';
+function askDevPassword(cb) {
+  if (_devUnlocked) { cb(); return; }
+  let pwdVal = '';
+  const mask = modalBox(`
+    <div class="mb-title">🔒 开发者面板</div>
+    <div class="mb-text dim">请输入开发者密码</div>
+    <input id="devPwd" type="password" class="dev-pwd" placeholder="开发者密码" autocomplete="off" />`, [
+    { text: '进入', cls: 'btn-primary', fn: () => {
+        if (pwdVal === DEV_PASSWORD) { _devUnlocked = true; cb(); }
+        else toast('❌ 密码错误');
+      } },
+    { text: '取消', cls: 'btn-ghost' },
+  ]);
+  const inp = mask.querySelector('#devPwd');
+  if (inp) inp.addEventListener('input', (e) => { pwdVal = e.target.value; });
+}
+
 function openDevPanel(sc) {
   const s = Meta.get();
   const mask = modalBox(`
     <div class="mb-title">🛠 开发者面板</div>
     <div class="mb-text dim">进度 ${s.unlockedLevels} 关 · 金币 ${s.gold} · 体力 ${s.energy}/${ENERGY_MAX}</div>
     <div class="dev-btns">
+      <button class="btn btn-soft" id="devAuto">🤖 自动技能：${sc.game && sc.game.auto ? '开' : '关'}</button>
       <button class="btn btn-soft" id="devFinish">✅ 全关卡三星通关（解锁全部章节）</button>
       <button class="btn btn-soft" id="devRes">💰 资源拉满（金币/体力/道具/碎片）</button>
       <button class="btn btn-soft" id="devChar">🌟 全角色解锁+Lv30+满星（解锁隐藏章）</button>
       <button class="btn btn-soft" id="devInfo">🔍 查看存档状态</button>
       <button class="btn btn-red" id="devOff">🚫 关闭开发者模式</button>
     </div>`, [{ text: '收起', cls: 'btn-ghost' }]);
+  mask.querySelector('#devAuto').onclick = () => {
+    const on = sc.game.toggleAuto();
+    const b = mask.querySelector('#devAuto');
+    if (b) b.textContent = `🤖 自动技能：${on ? '开' : '关'}`;
+  };
   mask.querySelector('#devFinish').onclick = () => {
     const st = Meta.get();
     for (const lv of Meta.levels) st.levelStars[lv.id] = 3;

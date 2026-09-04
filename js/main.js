@@ -163,7 +163,7 @@ const Game = {
     Bgm.play(isBoss ? 'boss' : battleTracks[Math.abs(level.id || 1) % battleTracks.length]);
     if (isBoss) Sfx.play('boss');
     this._startTimer();
-    toast(`第${level.id}关：${goalText(level)}`, 2400);
+    toast(this.endless ? `♾️ 无尽模式 · 第${this.endless.wave}波：${goalText(level)}` : `第${level.id}关：${goalText(level)}`, 2400);
   },
 
   /** 确定性伪随机格位生成（避开 ice/chain 占用格） */
@@ -219,6 +219,14 @@ const Game = {
     if (locked.has(r1) || locked.has(r2)) { toast('这行被封印了，先解除封锁！'); return; }
     const res = this.board.swap(r1, c1, r2, c2);
     if (!res) { Sfx.play('invalid'); return; } // 非法交换，引擎已还原棋盘
+    // 收尾清理：合并残留匹配消除，保证不留活匹配且计入伤害/目标
+    const ex0 = this.board.settle();
+    if (ex0 && ex0.events && ex0.events.length) {
+      res.events.push(...ex0.events);
+      res.score += ex0.score || 0;
+      res.moves = (res.moves || 0) + (ex0.moves || 0);
+      for (const [k, v] of Object.entries(ex0.matchedCounts || {})) res.matchedCounts[k] = (res.matchedCounts[k] || 0) + v;
+    }
     this.busy = true;
     this.input.setLocked(true);
     Sfx.play('swap');
@@ -266,6 +274,7 @@ const Game = {
       this.busy = false;
       if (this.input) this.input.setLocked(false);
     }
+    if (this.auto && this.battle && !this.battle.state.over) await this._autoStep();
   },
 
   /** 回合后演出与机制触发 */
@@ -533,6 +542,8 @@ const Game = {
       if (card) card.classList.add('cast');
       this.renderer.playFx('skillCast', { charId: ch.id, color: idx % 6 });
       const r = this.battle.useSkill(idx);
+      const exS = this.board.settle();
+      if (r.ok && exS && exS.events && exS.events.length) { (r.events = r.events || []).push(...exS.events); this._accProgress(exS); }
       if (r.ok) {
         Meta.addFavorExp(ch.id, 5);
         if (r.wheel) toast(`🎰 命运转盘：${r.wheel}！`, 2000);
@@ -617,11 +628,14 @@ const Game = {
     try {
       this.movesUsed++;   // 变色瓶也算一回合
       const ir = this.battle.useItemCombat('colorBottle', null, { from, to });
+      const exF = this.board.settle();
+      if (exF && exF.events && exF.events.length) { (ir.events = ir.events || []).push(...exF.events); for (const [k, v] of Object.entries(exF.matchedCounts || {})) ir.matchedCounts[k] = (ir.matchedCounts[k] || 0) + v; }
       await this._resolveItemCombat(ir);
     } finally {
       this.busy = false;
       if (this.input) this.input.setLocked(false);
     }
+    if (this.auto && this.battle && !this.battle.state.over) await this._autoStep();
   },
 
   async onPickCell(r, c) {
@@ -637,11 +651,14 @@ const Game = {
     try {
       this.movesUsed++;   // 锤子/十字炸弹也算一回合
       const ir = this.battle.useItemCombat(item, { r, c });
+      const exP = this.board.settle();
+      if (exP && exP.events && exP.events.length) { (ir.events = ir.events || []).push(...exP.events); for (const [k, v] of Object.entries(exP.matchedCounts || {})) ir.matchedCounts[k] = (ir.matchedCounts[k] || 0) + v; }
       await this._resolveItemCombat(ir);
     } finally {
       this.busy = false;
       if (this.input) this.input.setLocked(false);
     }
+    if (this.auto && this.battle && !this.battle.state.over) await this._autoStep();
   },
 
   /** 输出型道具结算：播放消除动画 → 计入目标 → 伤害飘字 → 敌人回合演出 → 胜负 */
@@ -865,60 +882,25 @@ const Game = {
   // ============ 自动战斗：自动释放就绪技能 + 自动消除（可开关）============
   toggleAuto() {
     this.auto = !this.auto;
-    const btn = document.getElementById('btAuto');
-    if (btn) { btn.classList.toggle('on', this.auto); btn.textContent = this.auto ? '⚡自动:开' : '⚡自动:关'; }
-    if (this.auto) {
-      Sfx.play('button');
-      toast('🤖 自动战斗开启：自动放技能 + 自动消除');
-      this._autoStep();
-    } else {
-      if (this._autoTimer) { clearTimeout(this._autoTimer); this._autoTimer = 0; }
-      toast('🤖 自动战斗已关闭');
-    }
+    toast(this.auto ? '🤖 自动技能：开（到时机自动放技能，滑动仍手动）' : '🤖 自动技能：关');
+    return this.auto;
   },
 
+  // 到时机自动释放所有就绪技能（不自动滑动；滑动仍由玩家手动）
   async _autoStep() {
-    if (!this.auto) return;
-    if (Scenes.current !== 'battle') { this._stopAuto(); return; }
-    if (!this.battle) { this._autoTimer = setTimeout(() => this._autoStep(), 220); return; }
-    if (this.battle.state.over) {
-      // 无尽模式波间过渡：等下一波；其余情况停止
-      if (this.endless) { this._autoTimer = setTimeout(() => this._autoStep(), 320); return; }
-      this._stopAuto(); return;
-    }
-    // 有弹窗/正在结算/选目标时暂停自动
-    if (this.busy || this.pickMode || document.querySelector('#modal-root .modal-mask')) {
-      this._autoTimer = setTimeout(() => this._autoStep(), 220); return;
-    }
-    // 1) 优先释放就绪的主动技能
-    let acted = false;
+    if (!this.auto || !this.battle || this.battle.state.over) return;
+    if (this.busy || this.pickMode) return;
+    if (document.querySelector('#modal-root .modal-mask')) return;
     for (let i = 0; i < this.team.length; i++) {
+      if (!this.auto || this.battle.state.over) break;
       const ch = this.team[i];
       const m = (this.battle.state.members || [])[i];
       if ((m && m.fainted) || (this.battle.state.skillCds[ch.id] || 0) > 0) continue;
       await this.useSkill(i);
-      acted = true;
-      break;
     }
-    // 2) 无技能就绪 → 用提示自动消除一步
-    if (!acted && this.battle && !this.battle.state.over && !this.busy) {
-      const hint = this.board.useHint();
-      if (hint) await this.doSwap(hint.r1, hint.c1, hint.r2, hint.c2);
-      else {
-        const r = this.board.shuffleAll();
-        await this.renderer.playEvents((r && r.events) || []);
-        toast('没有可消除的组合，自动洗牌！');
-      }
-    }
-    if (this.auto) this._autoTimer = setTimeout(() => this._autoStep(), 320);
   },
 
-  _stopAuto() {
-    this.auto = false;
-    if (this._autoTimer) { clearTimeout(this._autoTimer); this._autoTimer = 0; }
-    const btn = document.getElementById('btAuto');
-    if (btn) { btn.classList.remove('on'); btn.textContent = '⚡自动:关'; }
-  },
+  _stopAuto() { this.auto = false; },
 
   // ============================================================
   // 无尽模式：波次无限爬塔，敌人逐波变强，波间回复 20% HP
