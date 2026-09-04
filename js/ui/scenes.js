@@ -88,9 +88,12 @@ export const Scenes = {
     const fn = this['render_' + name];
     if (fn) fn.call(this, node);
     updateTopbar();
-    // V5 BGM：战斗曲由 startBattle 负责；结算页静音让旋律独奏；其余场景播轻松主题曲
-    if (name === 'result') Bgm.stop();
-    else if (name !== 'battle') Bgm.play('home');
+    // V5 BGM：按场景切换曲目 + 翻页音
+    if (name !== 'battle') {
+      Sfx.play('page');
+      const track = { home: 'menu', map: 'map', shop: 'shop', chars: 'menu', lineup: 'menu', result: 'result' }[name] || 'menu';
+      Bgm.play(track);
+    }
   },
 
   // ============================================================

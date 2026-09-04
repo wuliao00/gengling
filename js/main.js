@@ -50,7 +50,11 @@ const Game = {
       }
       Bgm.kick();
     }, { passive: true });
-    // V5 开发者模式：?dev=1 持久化开启；顶栏标题 5 连点也可开启
+    // 通用 UI 点击音
+    document.addEventListener('pointerdown', (e) => {
+      const t = e.target;
+      if (t && t.closest && t.closest('button, .btn, .lv-node, .wm-node, .team-slot, .char-card, .item-check, .skill-btn, .item-btn, .shop-tab, .chap-tab')) Sfx.play('click');
+    }, { passive: true });
     const qDev = new URLSearchParams(location.search).get('dev');
     if (qDev === '1') { Meta.get().progress.dev = true; Meta.persist(); }
     let _devTaps = 0, _devT0 = 0;
@@ -159,8 +163,9 @@ const Game = {
     this.renderer.setRowLocks([]);
     // V5 BGM：Boss 关用紧张曲；普通战斗在 3 首战斗曲间轮换（按关卡 id），满足"战斗背景音≥2 种"
     const isBoss = level.boss || level.type === 'boss';
-    const battleTracks = ['battle', 'battle2', 'battle3'];
-    Bgm.play(isBoss ? 'boss' : battleTracks[Math.abs(level.id || 1) % battleTracks.length]);
+    const isTimed = (level.goal && level.goal.time) || level.type === 'timed';
+    const battleTracks = ['normal', 'upbeat', 'combo'];
+    Bgm.play(isBoss ? 'boss' : isTimed ? 'time' : battleTracks[Math.abs(level.id || 1) % battleTracks.length]);
     if (isBoss) Sfx.play('boss');
     this._startTimer();
     toast(this.endless ? `♾️ 无尽模式 · 第${this.endless.wave}波：${goalText(level)}` : `第${level.id}关：${goalText(level)}`, 2400);
@@ -241,7 +246,13 @@ const Game = {
         else if (ev.type === 'rainbow') Sfx.play('rainbow');
         else if (ev.type === 'treasure') Sfx.play('treasure');
         else if (ev.type === 'wind') Sfx.play('wind');
+        else if (ev.type === 'fall') Sfx.play('fall');
+        else if (ev.type === 'specialSpawn') Sfx.play(ev.kind === 'rainbow' ? 'five' : 'four');
       }
+      // 连锁 combo 音
+      if ((res.moves || 0) >= 4) Sfx.play('super');
+      else if ((res.moves || 0) === 3) Sfx.play('combo3');
+      else if ((res.moves || 0) === 2) Sfx.play('combo2');
       this._accProgress(res);
       this._lastMove = res;
 
@@ -538,6 +549,9 @@ const Game = {
     try {
       // 施法演出：成员前倾 + 技能色光效 + 角色专属招式音
       Sfx.play(Sfx.has('skill_' + ch.id) ? 'skill_' + ch.id : 'skill');
+      const eff = (ch.skill && ch.skill.effect) || '';
+      if (/clearRow|clearCol/.test(eff)) Sfx.play('lineClear');
+      else if (/clearArea|randomClear/.test(eff)) Sfx.play('areaPop');
       const card = document.querySelectorAll('#btMembers .member-card')[idx];
       if (card) card.classList.add('cast');
       this.renderer.playFx('skillCast', { charId: ch.id, color: idx % 6 });

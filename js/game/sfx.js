@@ -1,17 +1,11 @@
-// sfx.js — 《梗灵大陆》合成音效 + 芯片音乐 BGM（WebAudio 全合成，零外部资源）
-// 用法：import { Sfx, Bgm } from './sfx.js';
-//   Sfx.play('match', {step: chainIndex});    // 即时音效
-//   Sfx.play('skill_hajimiao');               // 角色专属招式音
-//   Bgm.play('home'|'battle'|'battle2'|'battle3'|'boss');  // 场景循环 BGM
-// 无 AudioContext 环境（Node/jsdom/旧浏览器）自动静默降级。
-//
-// A 方案升级要点：
-//  · 音色引擎：主振荡 + 失谐副振荡 + 低通滤波 + AD 包络 + 噪声层，比旧版单扫频更饱满、 less 刺耳
-//  · 7 个角色各自专属招式音（猫叫/狗吼/飞行/转盘/剑鸣/牛哞/煮面）
-//  · 开场音 opening、通用点击音 click
-//  · 战斗 BGM 增至 3 首（battle/battle2/battle3）+ 底鼓/军鼓，主输出低通软化
+// sfx.js — 《梗灵大陆》合成音效 + 芯片/音乐盒 BGM（WebAudio 全合成，零外部资源）
+// 音色取向（按需求）：可爱、明亮、糖果感、马林巴/木琴/铃/音乐盒/软钢琴/拨弦/暖垫/轻打击；
+//   短促、干净、悦耳；无暴力、无刺耳噪声、无长混响、无大爆炸。
+// 用法：Sfx.play(name, opts) / Sfx.jingle(name) / Bgm.play(track) / Bgm.stop() / Bgm.kick()
 
-// ---------- 共享：噪声缓冲（懒建，一次即可）----------
+const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);          // MIDI → 频率
+const clampF = (f) => Math.max(20, Math.min(18000, f));
+
 let _noise = null;
 function noiseBuf(ctx) {
   if (_noise) return _noise;
@@ -22,62 +16,123 @@ function noiseBuf(ctx) {
   _noise = buf;
   return buf;
 }
-const clampF = (f) => Math.max(20, Math.min(18000, f));
 
-// ============ 即时音效描述表 ============
-// 字段：type 波形, f0/f1 起止频率, fm 中间频率(可选，做 meow/siren 双段滑音), dur 时长,
-//       vol 音量, atk 起音(秒), noise 噪声混合比(0-1), lp 低通截止(Hz), detune 副振荡失谐(音分)
-const SPEAKER = {
-  // UI / 系统
-  click:    { type: 'square',   f0: 900,  f1: 1250, dur: 0.045, vol: 0.09, atk: 0.002, lp: 6500 },
-  tap:      { type: 'square',   f0: 660,  f1: 660,  dur: 0.05,  vol: 0.08, lp: 5200 },
-  button:   { type: 'triangle', f0: 520,  f1: 900,  dur: 0.085, vol: 0.13, lp: 7000, detune: 6 },
-  back:     { type: 'sine',     f0: 620,  f1: 360,  dur: 0.09,  vol: 0.11 },
-  invalid:  { type: 'square',   f0: 200,  f1: 120,  dur: 0.16,  vol: 0.12, lp: 1500, noise: 0.15 },
-  // 棋盘
-  swap:     { type: 'sine',     f0: 440,  f1: 700,  dur: 0.08,  vol: 0.12 },
-  match:    { type: 'square',   f0: 523,  f1: 784,  dur: 0.12,  vol: 0.13, lp: 5200, detune: 5 },
-  pop:      { type: 'sine',     f0: 880,  f1: 1320, dur: 0.06,  vol: 0.10 },
-  bomb:     { type: 'sawtooth', f0: 210,  f1: 45,   dur: 0.34,  vol: 0.22, noise: 0.7, lp: 1700 },
-  rainbow:  { type: 'sine',     f0: 523,  f1: 1250, dur: 0.42,  vol: 0.17, detune: 8, lp: 8500 },
-  treasure: { type: 'triangle', f0: 784,  f1: 1568, dur: 0.30,  vol: 0.17, lp: 9000 },
-  wind:     { type: 'sine',     f0: 280,  f1: 950,  dur: 0.32,  vol: 0.09, noise: 0.5, lp: 2600 },
-  shuffle:  { type: 'triangle', f0: 400,  f1: 720,  dur: 0.14,  vol: 0.10, noise: 0.3 },
-  ice:      { type: 'square',   f0: 1500, f1: 620,  dur: 0.14,  vol: 0.11, noise: 0.4, lp: 7500 },
-  chain:    { type: 'square',   f0: 720,  f1: 300,  dur: 0.16,  vol: 0.11, noise: 0.35, lp: 3200 },
-  // 战斗
-  skill:    { type: 'sawtooth', f0: 330,  f1: 990,  dur: 0.30,  vol: 0.15, lp: 4200 },
-  hit:      { type: 'square',   f0: 340,  f1: 110,  dur: 0.15,  vol: 0.19, noise: 0.4, lp: 2400 },
-  hurt:     { type: 'sawtooth', f0: 210,  f1: 85,   dur: 0.24,  vol: 0.19, noise: 0.3, lp: 1500 },
-  shield:   { type: 'triangle', f0: 500,  f1: 1450, dur: 0.22,  vol: 0.17, detune: 10, lp: 8500, noise: 0.18 },
-  heal:     { type: 'sine',     f0: 660,  f1: 1000, dur: 0.22,  vol: 0.13 },
-  boss_skill:{ type: 'sawtooth',f0: 150,  f1: 60,   dur: 0.50,  vol: 0.22, noise: 0.6, lp: 1300 },
-  enemy_atk:{ type: 'sawtooth', f0: 300,  f1: 120,  dur: 0.20,  vol: 0.15, noise: 0.35, lp: 1900 },
-  stun:     { type: 'triangle', f0: 760,  f1: 380,  dur: 0.22,  vol: 0.13, detune: 14 },
-  faint:    { type: 'sawtooth', f0: 300,  f1: 90,   dur: 0.40,  vol: 0.15, lp: 1300 },
-  // 奖励 / 结算
-  coin:     { type: 'square',   f0: 988,  f1: 1319, dur: 0.09,  vol: 0.12 },
-  levelup:  { type: 'square',   f0: 523,  f1: 1046, dur: 0.35,  vol: 0.17, detune: 6 },
-  slot:     { type: 'square',   f0: 800,  f1: 800,  dur: 0.04,  vol: 0.08 },
-  star:     { type: 'triangle', f0: 1046, f1: 2093, dur: 0.25,  vol: 0.15, lp: 9000 },
-  chest:    { type: 'triangle', f0: 659,  f1: 1319, dur: 0.35,  vol: 0.17 },
-  energy:   { type: 'sine',     f0: 392,  f1: 1175, dur: 0.30,  vol: 0.15 },
-  boss:     { type: 'sawtooth', f0: 110,  f1: 55,   dur: 0.50,  vol: 0.20, noise: 0.3, lp: 950 },
-  victory:  { type: 'square',   f0: 523,  f1: 1046, dur: 0.60,  vol: 0.18 },
-  defeat:   { type: 'sawtooth', f0: 330,  f1: 110,  dur: 0.60,  vol: 0.16, lp: 1300 },
-  // 角色专属招式（单段描述；zhuanzhuanjun/mianshifu/opening 走 CUSTOM 多段）
-  skill_hajimiao:      { type: 'sine',     f0: 520, fm: 900, f1: 420,  dur: 0.30, vol: 0.18, lp: 5200 },
-  skill_dasangwang:    { type: 'sawtooth', f0: 280, f1: 90,           dur: 0.26, vol: 0.22, noise: 0.6, lp: 1500 },
-  skill_feitianxia:    { type: 'sine',     f0: 300, f1: 1500,         dur: 0.34, vol: 0.15, noise: 0.45, lp: 6500 },
-  skill_zifengzhiwang: { type: 'square',   f0: 920, f1: 480,          dur: 0.28, vol: 0.17, detune: 20, noise: 0.35, lp: 8500 },
-  skill_xiaoniu:       { type: 'sawtooth', f0: 190, fm: 150, f1: 110, dur: 0.40, vol: 0.19, lp: 850 },
+// ---- 可爱音色基元 ----
+// 马林巴/音乐盒拨弦：基音+泛音，快起音、指数衰减
+function pluck(ctx, dest, f, t0, dur, vol, opt = {}) {
+  const harm = opt.harm != null ? opt.harm : 2;
+  const hvol = opt.hvol != null ? opt.hvol : 0.35;
+  const type = opt.type || 'sine';
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+  g.connect(dest);
+  const mk = (mult, vv, ty) => {
+    const o = ctx.createOscillator();
+    o.type = ty; o.frequency.setValueAtTime(clampF(f * mult), t0);
+    const gg = ctx.createGain(); gg.gain.value = vv;
+    o.connect(gg).connect(g); o.start(t0); o.stop(t0 + dur + 0.02);
+  };
+  mk(1, 1, type);
+  mk(harm, hvol, 'sine');
+  mk(harm * 1.5, hvol * 0.4, 'sine');
+}
+// 铃/钟琴：明亮泛音
+function bell(ctx, dest, f, t0, dur, vol) { pluck(ctx, dest, f, t0, dur, vol, { harm: 2.7, hvol: 0.3 }); }
+// 高光叮：极短高音正弦
+function sparkle(ctx, dest, f, t0, vol) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(clampF(f), t0);
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0005, t0 + 0.18);
+  o.connect(g).connect(dest); o.start(t0); o.stop(t0 + 0.2);
+}
+// 卡通软"噗"：低通噪声（不刺耳）
+function poof(ctx, dest, t0, dur, vol, cut = 1200) {
+  const src = ctx.createBufferSource(); src.buffer = noiseBuf(ctx);
+  const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(clampF(cut), t0);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0005, t0 + dur);
+  src.connect(f).connect(g).connect(dest); src.start(t0); src.stop(t0 + dur + 0.02);
+}
+// 暖和声垫：持续失谐三角波（根音+五度）
+function pad(ctx, dest, midi, t0, dur, vol) {
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.06);
+  g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+  g.connect(dest);
+  [0, 7].forEach((semi) => {
+    const o = ctx.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(clampF(mf(midi + semi)), t0);
+    o.connect(g); o.start(t0); o.stop(t0 + dur + 0.02);
+  });
+}
+
+// ============ 音效表（name → 合成函数）============
+const SFX = {
+  // —— UI ——
+  click: (c, d, t) => pluck(c, d, 660, t, 0.09, 0.10),
+  tap: (c, d, t) => pluck(c, d, 660, t, 0.08, 0.08),
+  button: (c, d, t) => { pluck(c, d, 523, t, 0.10, 0.10); pluck(c, d, 784, t + 0.06, 0.12, 0.10); },
+  confirm: (c, d, t) => { pluck(c, d, 523, t, 0.10, 0.10); pluck(c, d, 659, t + 0.07, 0.10, 0.10); pluck(c, d, 784, t + 0.14, 0.14, 0.11); },
+  back: (c, d, t) => pluck(c, d, 392, t, 0.12, 0.09),
+  cancel: (c, d, t) => { pluck(c, d, 330, t, 0.10, 0.08); poof(c, d, t, 0.08, 0.03, 900); },
+  page: (c, d, t) => { [880, 1175, 1568].forEach((f, i) => sparkle(c, d, f, t + i * 0.04, 0.05)); },
+  invalid: (c, d, t) => { pluck(c, d, 196, t, 0.14, 0.09, { type: 'triangle' }); poof(c, d, t, 0.10, 0.04, 700); },
+  // —— 棋盘 ——
+  swap: (c, d, t) => { pluck(c, d, 440, t, 0.07, 0.08); pluck(c, d, 587, t + 0.04, 0.07, 0.07); },
+  match: (c, d, t, o) => { const st = (o && o.step) || 0; const b = 523 * Math.pow(2, st * 2 / 12); pluck(c, d, b, t, 0.14, 0.11); sparkle(c, d, b * 2, t + 0.02, 0.04); },
+  four: (c, d, t) => { pluck(c, d, 659, t, 0.12, 0.11); pluck(c, d, 880, t + 0.06, 0.12, 0.11); sparkle(c, d, 1760, t + 0.1, 0.05); },
+  five: (c, d, t) => { [784, 988, 1175, 1568].forEach((f, i) => bell(c, d, f, t + i * 0.05, 0.2, 0.10)); },
+  combo1: (c, d, t) => { [659, 784].forEach((f, i) => pluck(c, d, f, t + i * 0.05, 0.12, 0.10)); },
+  combo2: (c, d, t) => { [659, 784, 988].forEach((f, i) => pluck(c, d, f, t + i * 0.05, 0.12, 0.11)); },
+  combo3: (c, d, t) => { [659, 784, 988, 1319].forEach((f, i) => pluck(c, d, f, t + i * 0.045, 0.12, 0.11)); },
+  super: (c, d, t) => { [784, 988, 1175, 1568, 2093].forEach((f, i) => bell(c, d, f, t + i * 0.04, 0.22, 0.11)); poof(c, d, t, 0.2, 0.05, 1500); },
+  pop: (c, d, t) => pluck(c, d, 880, t, 0.07, 0.09),
+  bomb: (c, d, t) => { poof(c, d, t, 0.28, 0.10, 1400); pluck(c, d, 196, t, 0.2, 0.10, { type: 'triangle' }); },
+  rainbow: (c, d, t) => { [523, 659, 784, 1046, 1319].forEach((f, i) => bell(c, d, f, t + i * 0.05, 0.25, 0.10)); },
+  lineClear: (c, d, t) => { for (let i = 0; i < 6; i++) pluck(c, d, 523 * Math.pow(2, i / 6), t + i * 0.03, 0.1, 0.08); },
+  areaPop: (c, d, t) => { poof(c, d, t, 0.22, 0.09, 1600); [392, 494, 587].forEach((f, i) => pluck(c, d, f, t + i * 0.04, 0.12, 0.09)); },
+  fall: (c, d, t) => { for (let i = 0; i < 3; i++) pluck(c, d, 700 - i * 120, t + i * 0.04, 0.06, 0.05); },
+  treasure: (c, d, t) => { bell(c, d, 988, t, 0.2, 0.10); bell(c, d, 1319, t + 0.08, 0.22, 0.10); sparkle(c, d, 2093, t + 0.16, 0.05); },
+  chest: (c, d, t) => { bell(c, d, 659, t, 0.2, 0.10); bell(c, d, 988, t + 0.09, 0.22, 0.10); },
+  coin: (c, d, t) => { pluck(c, d, 988, t, 0.08, 0.10); pluck(c, d, 1319, t + 0.05, 0.10, 0.10); },
+  star: (c, d, t) => { bell(c, d, 1568, t, 0.22, 0.10); sparkle(c, d, 2093, t + 0.06, 0.05); },
+  reward: (c, d, t) => { [784, 988, 1175].forEach((f, i) => bell(c, d, f, t + i * 0.06, 0.2, 0.10)); },
+  // —— 战斗 ——
+  skill: (c, d, t) => { pluck(c, d, 440, t, 0.16, 0.10); sparkle(c, d, 1320, t + 0.05, 0.05); },
+  hit: (c, d, t) => { pluck(c, d, 330, t, 0.12, 0.11, { type: 'triangle' }); poof(c, d, t, 0.1, 0.05, 1200); },
+  hurt: (c, d, t) => { pluck(c, d, 220, t, 0.18, 0.11, { type: 'triangle' }); poof(c, d, t, 0.12, 0.05, 800); },
+  shield: (c, d, t) => { bell(c, d, 523, t, 0.2, 0.10); bell(c, d, 784, t + 0.06, 0.22, 0.09); },
+  heal: (c, d, t) => { pluck(c, d, 659, t, 0.16, 0.09); pluck(c, d, 880, t + 0.07, 0.18, 0.09); },
+  stun: (c, d, t) => { [880, 660].forEach((f, i) => sparkle(c, d, f, t + i * 0.07, 0.06)); },
+  faint: (c, d, t) => { [392, 330, 262].forEach((f, i) => pluck(c, d, f, t + i * 0.09, 0.2, 0.10, { type: 'triangle' })); },
+  boss: (c, d, t) => { pluck(c, d, 147, t, 0.4, 0.13, { type: 'triangle' }); poof(c, d, t, 0.3, 0.07, 600); },
+  boss_skill: (c, d, t) => { pluck(c, d, 175, t, 0.35, 0.12, { type: 'triangle' }); poof(c, d, t, 0.25, 0.07, 800); sparkle(c, d, 1200, t + 0.1, 0.04); },
+  enemy_atk: (c, d, t) => { pluck(c, d, 294, t, 0.16, 0.10, { type: 'triangle' }); poof(c, d, t, 0.12, 0.05, 1000); },
+  // —— 角色专属招式（可爱、各具辨识度）——
+  skill_hajimiao: (c, d, t) => { pluck(c, d, 523, t, 0.16, 0.10); pluck(c, d, 659, t + 0.06, 0.14, 0.10); pluck(c, d, 587, t + 0.14, 0.2, 0.09); },
+  skill_dasangwang: (c, d, t) => { pluck(c, d, 196, t, 0.22, 0.13, { type: 'triangle' }); poof(c, d, t, 0.18, 0.07, 900); pluck(c, d, 294, t + 0.1, 0.18, 0.11, { type: 'triangle' }); },
+  skill_feitianxia: (c, d, t) => { for (let i = 0; i < 5; i++) pluck(c, d, 440 * Math.pow(2, i / 5), t + i * 0.04, 0.1, 0.08); sparkle(c, d, 1760, t + 0.2, 0.05); },
+  skill_zhuanzhuanjun: (c, d, t) => { for (let i = 0; i < 6; i++) pluck(c, d, 523 + i * 110, t + i * 0.05, 0.08, 0.08); bell(c, d, 1568, t + 0.32, 0.2, 0.10); },
+  skill_zifengzhiwang: (c, d, t) => { pluck(c, d, 392, t, 0.2, 0.12, { type: 'triangle' }); bell(c, d, 784, t + 0.08, 0.2, 0.10); poof(c, d, t, 0.15, 0.05, 1000); },
+  skill_xiaoniu: (c, d, t) => { pluck(c, d, 262, t, 0.3, 0.12, { type: 'triangle' }); pluck(c, d, 196, t + 0.12, 0.3, 0.11, { type: 'triangle' }); },
+  skill_mianshifu: (c, d, t) => { for (let i = 0; i < 4; i++) pluck(c, d, 500 + Math.random() * 200, t + i * 0.06, 0.09, 0.07); bell(c, d, 1046, t + 0.26, 0.18, 0.09); },
+  // —— 系统 ——
+  levelup: (c, d, t) => { [523, 659, 784, 1046].forEach((f, i) => pluck(c, d, f, t + i * 0.07, 0.16, 0.11)); },
+  slot: (c, d, t) => pluck(c, d, 800, t, 0.05, 0.07),
+  energy: (c, d, t) => { pluck(c, d, 392, t, 0.14, 0.09); pluck(c, d, 587, t + 0.07, 0.16, 0.09); },
+  opening: (c, d, t) => { [523, 659, 784, 1046].forEach((f, i) => bell(c, d, f, t + i * 0.1, 0.25, 0.11)); sparkle(c, d, 2093, t + 0.45, 0.05); },
 };
 
 export const Sfx = {
   ctx: null,
   muted: false,
+  _masterBus: null,
 
-  /** 首次用户手势后调用以解锁音频 */
   unlock() {
     if (this.ctx) {
       if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
@@ -90,13 +145,13 @@ export const Sfx = {
     return (this.ctx && this.ctx.state === 'running') ? this.ctx : null;
   },
 
-  /** 全局主总线：增益→压缩→空气低通，防削顶并统一响度（SFX 与 BGM 共用）*/
+  // 全局主总线：增益→压缩→空气低通，防削顶、统一响度
   _bus() {
     if (this._masterBus) return this._masterBus;
     const ctx = this.ctx;
     if (!ctx) return null;
     try {
-      const g = ctx.createGain(); g.gain.value = 0.85;
+      const g = ctx.createGain(); g.gain.value = 0.9;
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -16; comp.knee.value = 24; comp.ratio.value = 8;
       comp.attack.value = 0.004; comp.release.value = 0.2;
@@ -107,8 +162,7 @@ export const Sfx = {
     } catch (_) { return ctx.destination; }
   },
 
-  /** 是否已定义某音效名 */
-  has(name) { return !!(CUSTOM[name] || SPEAKER[name]); },
+  has(name) { return !!SFX[name]; },
 
   setMuted(v) {
     this.muted = !!v;
@@ -116,92 +170,26 @@ export const Sfx = {
     else Bgm.kick();
   },
 
-  // ---- 底层发声单元 ----
-  /** 单振荡(+失谐副振荡)+低通+AD 包络 */
-  _osc(o) {
-    const ctx = this.ctx, t0 = o.t0, dur = o.dur;
-    const gain = ctx.createGain();
-    const atk = o.atk != null ? o.atk : 0.005;
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.linearRampToValueAtTime(o.vol, t0 + atk);
-    gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
-    // 统一低通软化：方波/锯齿默认削亮避免刺耳（可被 o.lp 覆盖）
-    const cut = o.lp != null ? o.lp : (o.type === 'sawtooth' ? 4200 : o.type === 'square' ? 5200 : 12000);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.setValueAtTime(clampF(cut), t0); lp.Q.value = 0.7;
-    gain.connect(lp);
-    lp.connect(o.dest || ctx.destination);
-    const mk = (det) => {
-      const osc = ctx.createOscillator();
-      osc.type = o.type || 'square';
-      osc.frequency.setValueAtTime(clampF(o.f0), t0);
-      if (o.fm) osc.frequency.exponentialRampToValueAtTime(clampF(o.fm), t0 + dur * 0.45);
-      osc.frequency.exponentialRampToValueAtTime(clampF(o.f1), t0 + dur);
-      if (det) osc.detune.setValueAtTime(det, t0);
-      osc.connect(gain);
-      osc.start(t0); osc.stop(t0 + dur + 0.02);
-    };
-    mk(0);
-    if (o.detune) mk(o.detune);   // 副振荡加厚
-  },
-
-  /** 噪声打击（爆炸/受击/气声/军鼓）*/
-  _noiseHit(o) {
-    const ctx = this.ctx, t0 = o.t0, dur = o.dur;
-    const src = ctx.createBufferSource();
-    src.buffer = noiseBuf(ctx);
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(o.vol, t0);
-    gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
-    let node = src;
-    if (o.lp || o.hp) {
-      const f = ctx.createBiquadFilter();
-      f.type = o.hp ? 'highpass' : 'lowpass';
-      f.frequency.setValueAtTime(clampF(o.hp || o.lp), t0); f.Q.value = 0.8;
-      src.connect(f); node = f;
-    }
-    node.connect(gain).connect(o.dest || ctx.destination);
-    src.start(t0); src.stop(t0 + dur + 0.02);
-  },
-
-  /**
-   * 播放音效
-   * @param {string} name SPEAKER/CUSTOM 键名
-   * @param {object} opts {step: 连锁数（match 升调）}
-   */
   play(name, opts = {}) {
     if (this.muted) return;
-    if (!CUSTOM[name] && !SPEAKER[name]) return;
+    const fn = SFX[name];
+    if (!fn) return;
     try {
       const ctx = this.unlock();
       if (!ctx || ctx.state !== 'running') return;
-      const t0 = ctx.currentTime;
-      const bus = this._bus() || ctx.destination;
-      if (CUSTOM[name]) { CUSTOM[name](ctx, bus, t0, this); return; }
-
-      const spec = SPEAKER[name];
-      const shift = name === 'match' ? Math.pow(2, (opts.step || 0) * 2 / 12) : 1;
-      const s = Object.assign({}, spec);
-      s.f0 *= shift; s.f1 *= shift; if (s.fm) s.fm *= shift;
-      s.t0 = t0; s.dest = bus;
-      this._osc(s);
-      if (s.noise > 0) {
-        this._noiseHit({ t0, dur: s.dur * 0.9, vol: s.vol * s.noise, lp: s.lp || 3000, dest: bus });
-      }
-      // 消除类叠加高频"闪粉"层，听感更脆
-      if (name === 'match' || name === 'star' || name === 'chest' || name === 'treasure') {
-        this._osc({ type: 'sine', f0: s.f1 * 2, f1: s.f1 * 2.6, dur: s.dur * 0.7, vol: s.vol * 0.3, atk: 0.002, t0, dest: bus });
-      }
+      fn(ctx, this._bus() || ctx.destination, ctx.currentTime, opts);
     } catch (_) { /* 静默 */ }
   },
 
-  /** 小旋律（victory/defeat/unlock）*/
+  // 小旋律（victory / three 三星 / failure / unlock）
   jingle(name = 'victory') {
     if (this.muted) return;
     const seqs = {
-      victory: [[523, 0], [659, 110], [784, 220], [1046, 330], [1318, 470]],
-      defeat:  [[392, 0], [330, 160], [262, 320]],
-      unlock:  [[523, 0], [659, 100], [784, 200], [880, 300], [1046, 420], [1568, 560]],
+      victory: [[523, 0], [659, 110], [784, 220], [1046, 330], [1319, 470]],
+      three: [[523, 0], [659, 90], [784, 180], [1046, 270], [1319, 360], [1568, 450], [2093, 560]],
+      failure: [[392, 0], [330, 160], [262, 320]],
+      defeat: [[392, 0], [330, 160], [262, 320]],
+      unlock: [[523, 0], [659, 100], [784, 200], [880, 300], [1046, 420], [1568, 560]],
     };
     const seq = seqs[name];
     if (!seq) return;
@@ -211,108 +199,152 @@ export const Sfx = {
         try {
           const ctx = self.ctx;
           if (!ctx || ctx.state !== 'running') return;
-          const t0 = ctx.currentTime;
-          self._osc({ type: 'square', f0: f, f1: f, dur: 0.16, vol: 0.15, detune: 5, lp: 7000, t0, dest: self._bus() || ctx.destination });
+          bell(ctx, self._bus() || ctx.destination, f, ctx.currentTime, 0.22, 0.12);
         } catch (_) { /* 静默 */ }
       }, dt);
     }
   },
 };
 
-// ============ 多段自定义音（转盘/煮面/开场）============
-const CUSTOM = {
-  // 转转君·命运转盘：一串快速上移咔哒 + 收尾叮
-  skill_zhuanzhuanjun(ctx, dest, t0, S) {
-    for (let i = 0; i < 7; i++) {
-      S._osc({ type: 'square', f0: 560 + i * 130, f1: 560 + i * 130, dur: 0.05, vol: 0.11, atk: 0.002, lp: 6500, t0: t0 + i * 0.055, dest });
-    }
-    S._osc({ type: 'triangle', f0: 1250, f1: 1900, dur: 0.20, vol: 0.13, lp: 9000, t0: t0 + 0.42, dest });
-  },
-  // 面师傅·忘情一碗面：咕嘟气泡 + 碗筷叮
-  skill_mianshifu(ctx, dest, t0, S) {
-    for (let i = 0; i < 6; i++) {
-      const f = 300 + Math.round(Math.random() * 280);
-      S._osc({ type: 'sine', f0: f * 0.6, f1: f, dur: 0.09, vol: 0.10, t0: t0 + i * 0.07, dest });
-    }
-    S._osc({ type: 'triangle', f0: 1400, f1: 2100, dur: 0.16, vol: 0.12, lp: 9000, t0: t0 + 0.44, dest });
-    S._noiseHit({ t0: t0 + 0.44, dur: 0.12, vol: 0.04, hp: 4000, dest });
-  },
-  // 开场：上行小号角 + 星光噪声
-  opening(ctx, dest, t0, S) {
-    [523, 659, 784, 1046].forEach((f, i) =>
-      S._osc({ type: 'triangle', f0: f, f1: f, dur: 0.17, vol: 0.15, detune: 6, lp: 9000, t0: t0 + i * 0.11, dest }));
-    S._noiseHit({ t0: t0 + 0.44, dur: 0.35, vol: 0.05, hp: 4200, dest });
-  },
-};
-
-// ============ 芯片音乐 BGM（lookahead 调度音序器）============
-const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);   // MIDI 音高 → 频率
-
-// 每轨 32 步（4 小节 × 8 分音符）：lead 主旋律 / bass 低音 / hat 踩镲；drum=1 加底鼓+军鼓
+// ============ BGM（lookahead 音序器，马林巴主奏+暖垫+轻打击）============
+// 每轨 32 步（4 小节 × 8 分音符）：lead 主旋律 / bass 低音 / pad 和声 / hat 踩镲；drum=1 加底鼓+军鼓
 const TRACKS = {
-  // 首页/地图：C 大调，轻快蹦跳（无鼓，柔和）
-  home: {
-    bpm: 108, drum: 0, pad: [48, 45, 41, 43],
-    lead: [72, 0, 76, 0, 79, 0, 76, 0,  77, 0, 81, 0, 79, 76, 72, 0,
-           72, 0, 76, 0, 79, 0, 84, 0,  83, 79, 76, 74, 72, 0, 0, 0],
-    bass: [48, 0, 55, 0, 45, 0, 52, 0,  41, 0, 48, 0, 43, 0, 50, 0,
-           48, 0, 55, 0, 45, 0, 52, 0,  41, 0, 48, 0, 43, 0, 50, 0],
-    hat:  [1, 0, 0, 0, 1, 0, 0, 1,  1, 0, 0, 0, 1, 0, 1, 0,
-           1, 0, 0, 0, 1, 0, 0, 1,  1, 0, 0, 0, 1, 0, 1, 1],
+  // 主菜单：欢快 welcoming
+  menu: {
+    bpm: 104, drum: 0, pad: [48, 45, 41, 43],
+    lead: [72, 0, 76, 0, 79, 0, 76, 0, 77, 0, 81, 0, 79, 76, 72, 0,
+      72, 0, 76, 0, 79, 0, 84, 0, 83, 79, 76, 74, 72, 0, 0, 0],
+    bass: [48, 0, 55, 0, 45, 0, 52, 0, 41, 0, 48, 0, 43, 0, 50, 0,
+      48, 0, 55, 0, 45, 0, 52, 0, 41, 0, 48, 0, 43, 0, 50, 0],
+    hat: [1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0,
+      1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1],
   },
-  // 战斗①：A 小调，紧凑推进
-  battle: {
-    bpm: 138, drum: 1, pad: [45, 41, 43, 45],
-    lead: [69, 0, 72, 76, 74, 0, 72, 0,  69, 0, 72, 76, 77, 76, 74, 72,
-           69, 0, 72, 76, 79, 0, 77, 76,  74, 74, 72, 71, 69, 0, 0, 0],
-    bass: [45, 45, 52, 45, 41, 41, 48, 41,  43, 43, 50, 43, 45, 45, 52, 45,
-           45, 45, 52, 45, 41, 41, 48, 41,  43, 43, 50, 43, 45, 45, 52, 45],
-    hat:  [1, 0, 1, 0, 1, 0, 1, 1,  1, 0, 1, 0, 1, 0, 1, 1,
-           1, 0, 1, 0, 1, 0, 1, 1,  1, 0, 1, 0, 1, 1, 1, 1],
+  // 地图：轻冒险
+  map: {
+    bpm: 96, drum: 0, pad: [45, 43, 41, 40],
+    lead: [69, 0, 72, 0, 76, 0, 72, 0, 74, 0, 77, 0, 76, 74, 69, 0,
+      69, 0, 72, 0, 76, 0, 81, 0, 80, 76, 74, 72, 69, 0, 0, 0],
+    bass: [45, 0, 52, 0, 43, 0, 50, 0, 41, 0, 48, 0, 43, 0, 47, 0,
+      45, 0, 52, 0, 43, 0, 50, 0, 41, 0, 48, 0, 43, 0, 47, 0],
+    hat: [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0,
+      1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1],
   },
-  // 战斗②：D 小调，更激进（切分更强）
-  battle2: {
-    bpm: 150, drum: 1, pad: [50, 48, 46, 45],
-    lead: [74, 0, 74, 77, 76, 0, 74, 0,  72, 0, 74, 76, 77, 0, 76, 74,
-           74, 0, 74, 77, 81, 0, 79, 77,  76, 76, 74, 72, 74, 0, 0, 0],
-    bass: [50, 50, 57, 50, 48, 48, 55, 48,  46, 46, 53, 46, 48, 48, 55, 48,
-           50, 50, 57, 50, 48, 48, 55, 48,  46, 46, 53, 46, 45, 45, 52, 45],
-    hat:  [1, 0, 1, 1, 1, 0, 1, 0,  1, 0, 1, 1, 1, 0, 1, 1,
-           1, 0, 1, 1, 1, 0, 1, 0,  1, 1, 1, 0, 1, 1, 1, 1],
+  // 普通战斗：放松专注
+  normal: {
+    bpm: 132, drum: 1, pad: [45, 41, 43, 45],
+    lead: [69, 0, 72, 76, 74, 0, 72, 0, 69, 0, 72, 76, 77, 76, 74, 72,
+      69, 0, 72, 76, 79, 0, 77, 76, 74, 74, 72, 71, 69, 0, 0, 0],
+    bass: [45, 45, 52, 45, 41, 41, 48, 41, 43, 43, 50, 43, 45, 45, 52, 45,
+      45, 45, 52, 45, 41, 41, 48, 41, 43, 43, 50, 43, 45, 45, 52, 45],
+    hat: [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1,
+      1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1],
   },
-  // 战斗③：E 小调，旋律性/英雄感
-  battle3: {
-    bpm: 132, drum: 1, pad: [52, 47, 45, 43],
-    lead: [76, 0, 79, 0, 83, 0, 79, 0,  81, 0, 79, 76, 78, 76, 74, 0,
-           76, 0, 79, 0, 84, 0, 83, 0,  81, 79, 78, 76, 79, 0, 76, 0],
-    bass: [52, 52, 59, 52, 47, 47, 54, 47,  45, 45, 52, 45, 47, 47, 54, 47,
-           52, 52, 59, 52, 47, 47, 54, 47,  45, 45, 52, 45, 43, 43, 50, 43],
-    hat:  [1, 0, 0, 1, 1, 0, 0, 1,  1, 0, 0, 1, 1, 0, 1, 1,
-           1, 0, 0, 1, 1, 0, 0, 1,  1, 0, 0, 1, 1, 1, 1, 1],
+  // 欢快战斗：bouncy
+  upbeat: {
+    bpm: 148, drum: 1, pad: [50, 48, 46, 45],
+    lead: [74, 0, 74, 77, 76, 0, 74, 0, 72, 0, 74, 76, 77, 0, 76, 74,
+      74, 0, 74, 77, 81, 0, 79, 77, 76, 76, 74, 72, 74, 0, 0, 0],
+    bass: [50, 50, 57, 50, 48, 48, 55, 48, 46, 46, 53, 46, 48, 48, 55, 48,
+      50, 50, 57, 50, 48, 48, 55, 48, 46, 46, 53, 46, 45, 45, 52, 45],
+    hat: [1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1,
+      1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1],
   },
-  // Boss：D 小调，低音压迫
+  // 高连击：energetic sparkling
+  combo: {
+    bpm: 156, drum: 1, pad: [52, 47, 45, 43],
+    lead: [76, 0, 79, 0, 83, 0, 79, 0, 81, 0, 79, 76, 78, 76, 74, 0,
+      76, 0, 79, 0, 84, 0, 83, 0, 81, 79, 78, 76, 79, 0, 76, 0],
+    bass: [52, 52, 59, 52, 47, 47, 54, 47, 45, 45, 52, 45, 47, 47, 54, 47,
+      52, 52, 59, 52, 47, 47, 54, 47, 45, 45, 52, 45, 43, 43, 50, 43],
+    hat: [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1,
+      1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1],
+  },
+  // Boss：playfully tense（不恐怖）
   boss: {
-    bpm: 148, drum: 1, pad: [38, 36, 34, 33],
-    lead: [62, 0, 65, 62, 69, 0, 65, 0,  62, 0, 65, 62, 70, 69, 67, 65,
-           60, 0, 63, 60, 67, 0, 63, 0,  62, 62, 65, 67, 69, 0, 74, 0],
-    bass: [38, 38, 45, 38, 38, 38, 45, 38,  36, 36, 43, 36, 36, 36, 43, 36,
-           34, 34, 41, 34, 34, 34, 41, 34,  33, 33, 40, 33, 38, 38, 45, 38],
-    hat:  [1, 1, 0, 1, 1, 0, 1, 1,  1, 1, 0, 1, 1, 0, 1, 1,
-           1, 1, 0, 1, 1, 0, 1, 1,  1, 1, 0, 1, 1, 1, 1, 1],
+    bpm: 144, drum: 1, pad: [38, 36, 34, 33],
+    lead: [62, 0, 65, 62, 69, 0, 65, 0, 62, 0, 65, 62, 70, 69, 67, 65,
+      60, 0, 63, 60, 67, 0, 63, 0, 62, 62, 65, 67, 69, 0, 74, 0],
+    bass: [38, 38, 45, 38, 38, 38, 45, 38, 36, 36, 43, 36, 36, 36, 43, 36,
+      34, 34, 41, 34, 34, 34, 41, 34, 33, 33, 40, 33, 38, 38, 45, 38],
+    hat: [1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1,
+      1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1],
+  },
+  // 限时：urgent but cute（加轻 tick）
+  time: {
+    bpm: 160, drum: 1, pad: [48, 46, 45, 43],
+    lead: [72, 72, 0, 76, 76, 0, 79, 0, 77, 77, 0, 76, 74, 0, 72, 0,
+      72, 72, 0, 76, 76, 0, 81, 0, 80, 80, 0, 79, 77, 0, 76, 0],
+    bass: [48, 48, 55, 48, 46, 46, 53, 46, 45, 45, 52, 45, 43, 43, 50, 43,
+      48, 48, 55, 48, 46, 46, 53, 46, 45, 45, 52, 45, 43, 43, 50, 43],
+    hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  },
+  // 商店：cozy playful
+  shop: {
+    bpm: 100, drum: 0, pad: [43, 41, 40, 38],
+    lead: [67, 0, 71, 0, 74, 0, 71, 0, 69, 0, 72, 0, 76, 72, 69, 0,
+      67, 0, 71, 0, 74, 0, 79, 0, 78, 74, 71, 69, 67, 0, 0, 0],
+    bass: [43, 0, 50, 0, 41, 0, 48, 0, 40, 0, 47, 0, 38, 0, 45, 0,
+      43, 0, 50, 0, 41, 0, 48, 0, 40, 0, 47, 0, 38, 0, 45, 0],
+    hat: [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0,
+      1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1],
+  },
+  // 活动：festive magical
+  event: {
+    bpm: 138, drum: 1, pad: [45, 43, 41, 45],
+    lead: [69, 0, 76, 0, 81, 0, 76, 0, 74, 0, 81, 0, 84, 81, 74, 0,
+      69, 0, 76, 0, 81, 0, 86, 0, 84, 81, 76, 74, 69, 0, 0, 0],
+    bass: [45, 45, 52, 45, 43, 43, 50, 43, 41, 41, 48, 41, 45, 45, 52, 45,
+      45, 45, 52, 45, 43, 43, 50, 43, 41, 41, 48, 41, 45, 45, 52, 45],
+    hat: [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1,
+      1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1],
+  },
+  // 结算：gentle satisfied
+  result: {
+    bpm: 90, drum: 0, pad: [48, 45, 43, 41],
+    lead: [72, 0, 0, 0, 76, 0, 0, 0, 79, 0, 0, 0, 76, 0, 72, 0,
+      74, 0, 0, 0, 77, 0, 0, 0, 81, 0, 79, 0, 77, 0, 74, 0],
+    bass: [48, 0, 0, 0, 55, 0, 0, 0, 45, 0, 0, 0, 52, 0, 0, 0,
+      43, 0, 0, 0, 50, 0, 0, 0, 41, 0, 48, 0, 43, 0, 50, 0],
+    hat: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+      1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+  },
+  // 加载：very light simple
+  loading: {
+    bpm: 80, drum: 0, pad: [48, 48, 45, 45],
+    lead: [72, 0, 0, 0, 0, 0, 0, 0, 76, 0, 0, 0, 0, 0, 0, 0,
+      79, 0, 0, 0, 0, 0, 0, 0, 84, 0, 0, 0, 0, 0, 0, 0],
+    bass: [48, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 0, 0, 0, 0,
+      48, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 0, 0, 0, 0],
+    hat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  },
+  // 暂停：calm minimal
+  pause: {
+    bpm: 72, drum: 0, pad: [45, 45, 43, 43],
+    lead: [69, 0, 0, 0, 0, 0, 0, 0, 72, 0, 0, 0, 0, 0, 0, 0,
+      76, 0, 0, 0, 0, 0, 0, 0, 72, 0, 0, 0, 0, 0, 0, 0],
+    bass: [45, 0, 0, 0, 0, 0, 0, 0, 43, 0, 0, 0, 0, 0, 0, 0,
+      45, 0, 0, 0, 0, 0, 0, 0, 43, 0, 0, 0, 0, 0, 0, 0],
+    hat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   },
 };
+// 旧调用名别名，保持兼容
+TRACKS.home = TRACKS.menu;
+TRACKS.battle = TRACKS.normal;
+TRACKS.battle2 = TRACKS.upbeat;
+TRACKS.battle3 = TRACKS.combo;
 
 export const Bgm = {
-  want: null,      // 期望曲目（未解锁音频时记忆，unlock 后自动起播）
-  track: null,     // 正在播放
+  want: null,
+  track: null,
   timer: 0,
   master: null,
-  lp: null,
   step: 0,
   nextT: 0,
   stepDur: 0.25,
 
-  /** 切换/起播曲目；静音或同名在播则跳过 */
   play(name) {
     this.want = name;
     if (Sfx.muted) { this.stop(); return; }
@@ -322,21 +354,18 @@ export const Bgm = {
 
   _start(name) {
     const ctx = Sfx.ctx || Sfx.unlock();
-    if (!ctx || Sfx.muted) return;            // 音频未解锁/静音，等 kick()
+    if (!ctx || Sfx.muted) return;
     this._teardown();
     const t = TRACKS[name];
     if (!t) return;
     try {
       this.master = ctx.createGain();
-      this.master.gain.value = 0.42;
-      // 主输出低通软化，削弱方波刺耳感；再汇入全局压缩总线
-      this.lp = ctx.createBiquadFilter();
-      this.lp.type = 'lowpass'; this.lp.frequency.value = 7200; this.lp.Q.value = 0.6;
-      this.master.connect(this.lp).connect(Sfx._bus() || ctx.destination);
+      this.master.gain.value = 0.5;
+      this.master.connect(Sfx._bus() || ctx.destination);
     } catch (_) { return; }
     this.track = name;
     this.step = 0;
-    this.stepDur = 60 / t.bpm / 2;            // 8 分音符步长
+    this.stepDur = 60 / t.bpm / 2;
     this.nextT = ctx.currentTime + 0.08;
     this.timer = setInterval(() => this._sched(t), 90);
     this._sched(t);
@@ -344,25 +373,20 @@ export const Bgm = {
 
   _sched(t) {
     if (!this.timer || !Sfx.ctx) return;
+    const ctx = Sfx.ctx;
+    const dest = this.master;
     try {
-      while (this.nextT < Sfx.ctx.currentTime + 0.35) {
+      while (this.nextT < ctx.currentTime + 0.35) {
         const i = this.step % 32;
         const time = this.nextT;
-        if (t.lead[i]) this._note(t.lead[i], time, this.stepDur * 0.9, 'square', 0.05);
-        if (t.bass[i]) this._note(t.bass[i], time, this.stepDur * 0.95, 'triangle', 0.075);
-        if (t.hat[i]) this._hat(time);
-        // 和声垫层：每小节一个持续三角波和弦（根音+五度），增厚听感
-        if (t.pad && i % 8 === 0) {
-          const root = t.pad[(i / 8) % t.pad.length];
-          if (root) {
-            this._note(root, time, this.stepDur * 7.6, 'triangle', 0.026);
-            this._note(root + 7, time, this.stepDur * 7.6, 'triangle', 0.018);
-          }
-        }
+        if (t.lead[i]) pluck(ctx, dest, mf(t.lead[i]), time, this.stepDur * 0.9, 0.055);
+        if (t.bass[i]) pluck(ctx, dest, mf(t.bass[i]), time, this.stepDur * 0.95, 0.07, { type: 'triangle', harm: 2, hvol: 0.2 });
+        if (t.pad && i % 8 === 0) pad(ctx, dest, t.pad[(i / 8) % t.pad.length], time, this.stepDur * 7.6, 0.026);
+        if (t.hat && t.hat[i]) poof(ctx, dest, time, 0.03, 0.012, 6000);
         if (t.drum) {
           if (i % 8 === 0 || i % 8 === 6) this._kick(time);
           if (i % 8 === 4) this._snare(time);
-          if (i % 8 === 7) this._snare(time, 0.02);   // 幽灵军鼓增加律动
+          if (i % 8 === 7) this._snare(time, 0.018);
         }
         this.step++;
         this.nextT += this.stepDur;
@@ -370,35 +394,19 @@ export const Bgm = {
     } catch (_) { /* 静默 */ }
   },
 
-  _note(midi, time, dur, type, vol) {
-    const ctx = Sfx.ctx;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = mf(midi);
-    g.gain.setValueAtTime(vol, time);
-    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-    osc.connect(g).connect(this.master);
-    osc.start(time);
-    osc.stop(time + dur + 0.02);
-  },
-
-  _hat(time) {
-    Sfx._noiseHit({ t0: time, dur: 0.03, vol: 0.014, hp: 7500, dest: this.master });
-  },
   _kick(time) {
     const ctx = Sfx.ctx;
-    const osc = ctx.createOscillator(), g = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(130, time);
-    osc.frequency.exponentialRampToValueAtTime(45, time + 0.12);
-    g.gain.setValueAtTime(0.11, time);
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120, time);
+    o.frequency.exponentialRampToValueAtTime(45, time + 0.12);
+    g.gain.setValueAtTime(0.10, time);
     g.gain.exponentialRampToValueAtTime(0.001, time + 0.13);
-    osc.connect(g).connect(this.master);
-    osc.start(time); osc.stop(time + 0.15);
+    o.connect(g).connect(this.master);
+    o.start(time); o.stop(time + 0.15);
   },
-  _snare(time, vol = 0.05) {
-    Sfx._noiseHit({ t0: time, dur: 0.09, vol, hp: 1600, dest: this.master });
+  _snare(time, vol = 0.04) {
+    poof(Sfx.ctx, this.master, time, 0.08, vol, 2500);
   },
 
   _teardown() {
@@ -407,14 +415,11 @@ export const Bgm = {
       try { this.master.gain.value = 0; this.master.disconnect(); } catch (_) {}
       this.master = null;
     }
-    if (this.lp) { try { this.lp.disconnect(); } catch (_) {} this.lp = null; }
     this.track = null;
   },
 
-  /** 停止 BGM */
   stop() { this._teardown(); },
 
-  /** 音频解锁/取消静音后尝试起播期望曲目 */
   kick() {
     if (Sfx.muted || !this.want) return;
     if (this.track === this.want && this.timer) return;
