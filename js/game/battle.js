@@ -287,9 +287,15 @@ export class Battle {
         this.betColor = rng.int(6);
         record();
         break;
-      case 'sub_convert': // 子化：只记事件，随机 3 格变子方块由 UI 层处理
+      case 'sub_convert': { // 子化：随机 3 格真正变为子方块
+        if (this.board && this.board.setSub) {
+          const cells = this.board.randomCells(3);
+          const res = this.board.setSub(cells);
+          this._bossEvents.push(...((res && res.events) || []));
+        }
         record();
         break;
+      }
       case 'allin': // 全押：HP<40% 时攻击翻倍，持续 3 回合
         if (e.maxHp > 0 && e.hp / e.maxHp < 0.4 && !(e.atkBuffTurns > 0)) {
           e.atkBuff = 1;

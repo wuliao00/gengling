@@ -22,7 +22,7 @@ export class Board {
     for (let r = 0; r < this.rows; r++) {
       const row = [];
       for (let c = 0; c < this.cols; c++) {
-        row.push({ color: 0, special: null, ice: 0, chain: 0, float: false, treasure: false, sub: false });
+        row.push({ color: 0, special: null, ice: 0, chain: 0, float: false, treasure: false, sub: false, echo: 0, silent: 0, wasSilent: false });
       }
       this.grid.push(row);
     }
@@ -36,6 +36,13 @@ export class Board {
       cc.sub = true;
       cc.color = -1; // 通配色，填充时跳过该格
     }
+    for (const s of seeds.echo || []) if (this._in(s.r, s.c)) this.grid[s.r][s.c].echo = 1;
+    for (const s of seeds.silent || []) {
+      if (!this._in(s.r, s.c)) continue;
+      const cc = this.grid[s.r][s.c];
+      cc.silent = s.layer != null ? s.layer : 1;
+      cc.wasSilent = true;
+    }
     if (opts.noInitialMatches === false) this._fillRandom();
     else this._fillNoMatches();
   }
@@ -47,7 +54,7 @@ export class Board {
     if (!this._in(r1, c1) || !this._in(r2, c2)) return null;
     if (Math.abs(r1 - r2) + Math.abs(c1 - c2) !== 1) return null;
     const a = this.grid[r1][c1], b = this.grid[r2][c2];
-    if (!a || !b || a.chain > 0 || b.chain > 0) return null;
+    if (!a || !b || a.chain > 0 || b.chain > 0 || a.silent > 0 || b.silent > 0) return null;
     this.grid[r1][c1] = b; this.grid[r2][c2] = a;
     const rainbowA = a.special === 'rainbow', rainbowB = b.special === 'rainbow';
     if (!rainbowA && !rainbowB && !this._matchAt(r1, c1) && !this._matchAt(r2, c2)) {
@@ -205,6 +212,34 @@ export class Board {
     return spots.slice(0, Math.max(0, n | 0));
   }
 
+  // 把指定格变为子方块（sub_convert Boss 技能用）
+  setSub(cells) {
+    const changed = [];
+    for (const p of cells || []) {
+      if (!this._in(p.r, p.c)) continue;
+      const cc = this.grid[p.r][p.c];
+      if (!cc || cc.chain > 0 || cc.silent > 0 || cc.special) continue;
+      cc.sub = true;
+      cc.color = -1;
+      changed.push({ r: p.r, c: p.c });
+    }
+    return { events: changed.length ? [{ type: 'subConvert', cells: changed }] : [], score: 0, matchedCounts: {} };
+  }
+
+  // 回声石被消除后，在一个存活的正交邻格再生同色方块
+  _echoRespawn(r, c, color, removed) {
+    for (const [dr, dc] of ORTHO) {
+      const nr = r + dr, nc = c + dc;
+      if (!this._in(nr, nc)) continue;
+      const k = this.k(nr, nc);
+      if (removed.has(k)) continue;
+      const nb = this.grid[nr][nc];
+      if (!nb || nb.chain > 0 || nb.silent > 0 || nb.special || nb.sub) continue;
+      nb.color = color;
+      return;
+    }
+  }
+
   // 气流（V2.1）：随机选 1 列，该列顶部 n 个非 chain 格被直接吹走
   //（不计入 matchedCounts、不计玩家消除分），随后走既有重力+补充+连锁管线。
   applyWind(n = 3) {
@@ -300,11 +335,11 @@ export class Board {
       let i = 0;
       while (i < inner) {
         const head = at(o, i);
-        if (!head || head.chain > 0) { i++; continue; }
+        if (!head || head.chain > 0 || head.silent > 0) { i++; continue; }
         let j = i + 1;
         while (j < inner) {
           const n = at(o, j);
-          if (n && n.chain === 0) j++; else break;
+          if (n && n.chain === 0 && n.silent === 0) j++; else break;
         }
         // 区间 [i, j)：对区间内出现过的每种颜色提取 (色|sub) 窗口
         const colors = new Set();
@@ -464,7 +499,7 @@ export class Board {
       let segBottom = this.rows - 1;
       for (let r = this.rows - 1; r >= 0; r--) {
         const cell = this.grid[r][c];
-        if (cell && (cell.chain > 0 || cell.float)) {
+        if (cell && (cell.chain > 0 || cell.float || cell.silent > 0)) {
           this._compactSeg(c, r + 1, segBottom, moves);
           segBottom = r - 1;
         }
@@ -498,7 +533,7 @@ export class Board {
     const cells = [];
     for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
       if (!this.grid[r][c]) {
-        const cell = { color: this.rng.int(this.colors), special: null, ice: 0, chain: 0, float: false, treasure: false, sub: false };
+        const cell = { color: this.rng.int(this.colors), special: null, ice: 0, chain: 0, float: false, treasure: false, sub: false, echo: 0, silent: 0, wasSilent: false };
         this.grid[r][c] = cell;
         cells.push({ r, c, cell });
       }
@@ -553,6 +588,7 @@ export class Board {
         const cc = this.grid[p.r][p.c];
         if (!cc) continue;
         if (cc.chain > 0 && !(forced && forced.has(k))) continue;
+        if (cc.silent > 0 && !(forced && forced.has(k))) continue;
         if (cc.ice > 0) continue;
         removed.add(k);
       }
@@ -587,6 +623,19 @@ export class Board {
         cc.chain--;
         if (cc.chain === 0) events.push({ type: 'chainOpen', r, c });
       }
+      // 静音区：相邻格参与消除 -> silent-1，归零解锁（方块保留）
+      for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
+        const cc = this.grid[r][c];
+        if (!cc || cc.silent <= 0) continue;
+        let near = false;
+        for (const [dr, dc] of ORTHO) {
+          const nr = r + dr, nc = c + dc;
+          if (this._in(nr, nc) && clearSet.has(this.k(nr, nc))) { near = true; break; }
+        }
+        if (!near) continue;
+        cc.silent--;
+        if (cc.silent === 0) events.push({ type: 'silentOpen', r, c });
+      }
       // 结算移除与得分：每格 10 分 x (1 + 0.2 x chainIndex)
       let n = 0;
       for (const k of removed) {
@@ -596,6 +645,11 @@ export class Board {
         matchedCounts[eff] = (matchedCounts[eff] || 0) + 1;
         if (cc.float) events.push({ type: 'floatDrop', r: p.r, c: p.c });
         if (cc.treasure) events.push({ type: 'treasure', r: p.r, c: p.c });
+        if (cc.wasSilent) events.push({ type: 'silentCleared', r: p.r, c: p.c });
+        if (cc.echo > 0) {
+          events.push({ type: 'echoCleared', r: p.r, c: p.c, color: eff });
+          this._echoRespawn(p.r, p.c, eff, removed);
+        }
         this.grid[p.r][p.c] = null;
         n++;
       }

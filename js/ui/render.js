@@ -319,6 +319,66 @@ function drawChain(ctx, cx, cy, s) {
   ctx.restore();
 }
 
+// 静音区覆盖：灰纱 + 静音喇叭 + 层数点
+function drawSilentOverlay(ctx, x, y, cs, layer) {
+  ctx.save();
+  rr(ctx, x + cs * 0.04, y + cs * 0.04, cs * 0.92, cs * 0.92, cs * 0.26);
+  ctx.fillStyle = 'rgba(90,90,105,0.42)';
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.2, cs * 0.04);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.stroke();
+  const cx = x + cs / 2, cy = y + cs / 2, s = cs;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(cx - s * 0.16, cy - s * 0.06);
+  ctx.lineTo(cx - s * 0.06, cy - s * 0.06);
+  ctx.lineTo(cx + s * 0.06, cy - s * 0.16);
+  ctx.lineTo(cx + s * 0.06, cy + s * 0.16);
+  ctx.lineTo(cx - s * 0.06, cy + s * 0.06);
+  ctx.lineTo(cx - s * 0.16, cy + s * 0.06);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,90,90,0.95)';
+  ctx.lineWidth = Math.max(1.5, cs * 0.05);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - s * 0.14, cy - s * 0.14);
+  ctx.lineTo(cx + s * 0.16, cy + s * 0.16);
+  ctx.stroke();
+  if (layer > 1) {
+    ctx.fillStyle = '#FFD93D';
+    for (let i = 0; i < layer; i++) {
+      ctx.beginPath();
+      ctx.arc(x + cs * 0.2 + i * cs * 0.12, y + cs * 0.86, cs * 0.045, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// 回声石覆盖：同心声波环
+function drawEchoOverlay(ctx, x, y, cs) {
+  ctx.save();
+  const cx = x + cs / 2, cy = y + cs / 2;
+  ctx.strokeStyle = 'rgba(120,220,255,0.9)';
+  ctx.lineCap = 'round';
+  for (let i = 1; i <= 3; i++) {
+    ctx.lineWidth = Math.max(1.2, cs * 0.045);
+    ctx.beginPath();
+    ctx.arc(cx, cy, cs * (0.14 + i * 0.09), -0.6, 0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, cs * (0.14 + i * 0.09), Math.PI - 0.6, Math.PI + 0.6);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(120,220,255,0.95)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, cs * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 // ============================================================
 // BoardRenderer — 棋盘渲染器 + 动画队列
 // ============================================================
@@ -693,6 +753,15 @@ export class BoardRenderer {
           drawCellAt(ctx, cell, x, y, cs, { variant, time: t });
         }
       }
+    }
+
+    // 回声石 / 静音区 覆盖标记（画在方块之上）
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const cell = g[r][c];
+      if (!cell) continue;
+      const x = ox + c * cs, y = oy + r * cs;
+      if (cell.silent > 0) drawSilentOverlay(ctx, x, y, cs, cell.silent);
+      else if (cell.echo > 0) drawEchoOverlay(ctx, x, y, cs);
     }
 
     // 掉落精灵（带小回弹）

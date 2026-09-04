@@ -132,7 +132,7 @@ const Game = {
 
     // ===== 棋盘种子（浮空/宝箱/子方块，按关卡机制确定性生成）=====
     const bd = level.board || {};
-    const seedCells = { ice: bd.ice, chain: bd.chain };
+    const seedCells = { ice: bd.ice, chain: bd.chain, echo: bd.echo, silent: bd.silent };
     if (sp.includes('浮空')) seedCells.float = this._patternCells(level.id * 31 + 5, 8, seedCells);
     if (sp.includes('宝箱')) seedCells.treasure = this._patternCells(level.id * 17 + 3, 3, seedCells);
     if (sp.includes('子方块')) seedCells.sub = this._patternCells(level.id * 13 + 11, 6, seedCells);
@@ -192,6 +192,8 @@ const Game = {
       bombCleared: 0,
       rainbowCleared: {},
       chainOpened: 0,
+      echoCleared: 0,
+      silentCleared: 0,
       totalCleared: 0,
     };
   },
@@ -425,6 +427,8 @@ const Game = {
         for (const cc of ev.cleared || []) P.rainbowCleared[cc.color] = (P.rainbowCleared[cc.color] || 0) + 1;
       }
       if (ev.type === 'chainOpen') P.chainOpened++;
+      if (ev.type === 'echoCleared') P.echoCleared++;
+      if (ev.type === 'silentCleared') P.silentCleared++;
       if (ev.type === 'floatDrop') this.floatDrops++;
       if (ev.type === 'treasure') this.treasures++;
     }
@@ -478,9 +482,12 @@ const Game = {
       }
       case 'gamble':
         return { ok: this.battle.aliveEnemies().length === 0, count: 0 };
-      // 引擎未实现的机制类目标：以总消除数兜底，保证可通关
-      case 'treasure2': case 'silentClear':
+      case 'silentClear':
+        return { ok: this.progress.silentCleared >= (g.count || 1), count: Math.min(this.progress.silentCleared, g.count || 1) };
       case 'clearEcho':
+        return { ok: this.progress.echoCleared >= (g.count || 1), count: Math.min(this.progress.echoCleared, g.count || 1) };
+      // 引擎未实现的机制类目标：以总消除数兜底，保证可通关
+      case 'treasure2':
         return cnt(g.count || 1);
       default:
         return { ok: false, count: 0 };

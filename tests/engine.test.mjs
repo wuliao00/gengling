@@ -496,6 +496,46 @@ test('useHint：含 float/treasure/sub 的棋盘仍返回可行交换', () => {
   assert.deepEqual(runsOf(b), []);
 });
 
+// ---------- V2.2 新增机制用例（echo / silent / setSub）----------
+
+test('echo 回声石：被消除发 echoCleared 且棋盘完整', () => {
+  const b = new Board({ seed: 51, seedCells: { echo: [{ r: 4, c: 4 }] } });
+  craft(b);
+  assert.equal(b.grid[4][4].echo, 1);
+  const res = b.clearCells([{ r: 4, c: 4 }]);
+  const ec = res.events.filter(e => e.type === 'echoCleared');
+  assert.equal(ec.length, 1);
+  assert.equal(ec[0].r, 4);
+  assert.equal(ec[0].c, 4);
+  assertFullNoHoles(b);
+});
+
+test('silent 静音区：锁定不可交换/不可匹配，邻消解锁，解锁后可清除发 silentCleared', () => {
+  const b = new Board({ seed: 52, seedCells: { silent: [{ r: 4, c: 4, layer: 1 }] } });
+  craft(b);
+  assert.equal(b.grid[4][4].silent, 1);
+  assert.equal(b.swap(4, 4, 4, 5), null, '静音格不可交换');
+  assert.equal(b._matchAt(4, 4), false, '静音格不参与匹配');
+  let res = b.clearCells([{ r: 4, c: 3 }]);
+  assert.ok(res.events.some(e => e.type === 'silentOpen' && e.r === 4 && e.c === 4), '邻消应解锁');
+  assert.equal(b.grid[4][4] ? b.grid[4][4].silent : 0, 0);
+  let cleared = res.events.filter(e => e.type === 'silentCleared').length;
+  if (b.grid[4][4] && b.grid[4][4].wasSilent) {
+    cleared += b.clearCells([{ r: 4, c: 4 }]).events.filter(e => e.type === 'silentCleared').length;
+  }
+  assert.ok(cleared >= 1, '静音格被清除应发 silentCleared');
+  assertFullNoHoles(b);
+});
+
+test('setSub：把指定格变为子方块并发 subConvert', () => {
+  const b = new Board({ seed: 53 });
+  craft(b);
+  const res = b.setSub([{ r: 2, c: 2 }, { r: 5, c: 5 }]);
+  assert.equal(b.grid[2][2].sub, true);
+  assert.equal(b.grid[2][2].color, -1);
+  assert.ok(res.events.some(e => e.type === 'subConvert' && e.cells.length === 2));
+});
+
 // ---------- 运行 ----------
 
 let failed = 0;
