@@ -4,6 +4,12 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#FFF3D9" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="assets/icon-1024.png" />
+<link rel="icon" type="image/png" href="assets/icon-1024.png" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <title>梗灵大陆</title>
 <link rel="stylesheet" href="css/game.css" />
 <link rel="stylesheet" href="css/cartoon.css" />
@@ -39,6 +45,14 @@
 </div>
 <div id="toast-root"></div>
 <div id="modal-root"></div>
+<script>
+  // PWA：注册 Service Worker（需 HTTPS 或 localhost 安全上下文）
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+</script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

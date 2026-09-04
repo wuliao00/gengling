@@ -1,0 +1,16 @@
+{
+  "name": "梗灵大陆",
+  "short_name": "梗灵大陆",
+  "description": "三消 + RPG 解压小游戏：7 只梗灵、156 关 + 无尽模式，纯前端离线可玩。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF3D9",
+  "theme_color": "#FFF3D9",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "assets/icon-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
+  ]
+}
