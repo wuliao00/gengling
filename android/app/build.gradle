@@ -14,9 +14,28 @@ android {
         versionName "1.0"
     }
 
+    signingConfigs {
+        release {
+            // 从环境变量读取（CI 注入 GitHub Secrets 解码出的密钥库）；
+            // 本地/无密钥时不配置，buildTypes.release 回退 debug 签名。
+            def kf = System.getenv('KEYSTORE_FILE')
+            if (kf) {
+                storeFile file(kf)
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KEY_ALIAS')
+                keyPassword System.getenv('KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            if (System.getenv('KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
         }
     }
 

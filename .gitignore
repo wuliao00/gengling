@@ -10,3 +10,8 @@ __pycache__/
 # 系统杂项
 .DS_Store
 Thumbs.db
+
+# 签名密钥库（绝不入库，仅存于 GitHub Secrets）
+release.keystore
+*.keystore
+*.jks
