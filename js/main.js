@@ -934,8 +934,9 @@ const Game = {
   /** 第 wave 波的关卡配置（程序化生成，强度随波数爬升） */
   _endlessLevel(wave) {
     const colors = Math.min(6, 4 + Math.floor(wave / 4));
-    const hp = Math.round(1200 * Math.pow(wave, 1.35) + 600);
-    const atk = Math.round(80 + wave * 20);
+    // V6 平衡：旧无尽曲线（1200*wave^1.35）后期血量远超步数预算；放缓增长使高波次仍可打
+    const hp = Math.round(500 * Math.pow(wave, 1.3) + 400);
+    const atk = Math.round(50 + wave * 12);
     const boss = wave % 5 === 0;
     const traits = ['shell', 'tornado', 'bet', 'rockfall', 'noise', 'allin'];
     return {

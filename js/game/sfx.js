@@ -85,9 +85,26 @@ export const Sfx = {
     }
     try {
       const AC = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
-      if (AC) this.ctx = new AC();
+      if (AC) { this.ctx = new AC(); this._masterBus = null; }
     } catch (_) { /* 无音频环境 */ }
     return (this.ctx && this.ctx.state === 'running') ? this.ctx : null;
+  },
+
+  /** 全局主总线：增益→压缩→空气低通，防削顶并统一响度（SFX 与 BGM 共用）*/
+  _bus() {
+    if (this._masterBus) return this._masterBus;
+    const ctx = this.ctx;
+    if (!ctx) return null;
+    try {
+      const g = ctx.createGain(); g.gain.value = 0.85;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -16; comp.knee.value = 24; comp.ratio.value = 8;
+      comp.attack.value = 0.004; comp.release.value = 0.2;
+      const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = 15000; air.Q.value = 0.5;
+      g.connect(comp); comp.connect(air); air.connect(ctx.destination);
+      this._masterBus = g;
+      return g;
+    } catch (_) { return ctx.destination; }
   },
 
   /** 是否已定义某音效名 */
@@ -108,13 +125,12 @@ export const Sfx = {
     gain.gain.setValueAtTime(0.0001, t0);
     gain.gain.linearRampToValueAtTime(o.vol, t0 + atk);
     gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
-    let tail = gain;
-    if (o.lp) {
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.setValueAtTime(clampF(o.lp), t0); lp.Q.value = 0.7;
-      gain.connect(lp); tail = lp;
-    }
-    tail.connect(o.dest || ctx.destination);
+    // 统一低通软化：方波/锯齿默认削亮避免刺耳（可被 o.lp 覆盖）
+    const cut = o.lp != null ? o.lp : (o.type === 'sawtooth' ? 4200 : o.type === 'square' ? 5200 : 12000);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(clampF(cut), t0); lp.Q.value = 0.7;
+    gain.connect(lp);
+    lp.connect(o.dest || ctx.destination);
     const mk = (det) => {
       const osc = ctx.createOscillator();
       osc.type = o.type || 'square';
@@ -160,20 +176,21 @@ export const Sfx = {
       const ctx = this.unlock();
       if (!ctx || ctx.state !== 'running') return;
       const t0 = ctx.currentTime;
-      if (CUSTOM[name]) { CUSTOM[name](ctx, ctx.destination, t0, this); return; }
+      const bus = this._bus() || ctx.destination;
+      if (CUSTOM[name]) { CUSTOM[name](ctx, bus, t0, this); return; }
 
       const spec = SPEAKER[name];
       const shift = name === 'match' ? Math.pow(2, (opts.step || 0) * 2 / 12) : 1;
       const s = Object.assign({}, spec);
       s.f0 *= shift; s.f1 *= shift; if (s.fm) s.fm *= shift;
-      s.t0 = t0; s.dest = ctx.destination;
+      s.t0 = t0; s.dest = bus;
       this._osc(s);
       if (s.noise > 0) {
-        this._noiseHit({ t0, dur: s.dur * 0.9, vol: s.vol * s.noise, lp: s.lp || 3000, dest: ctx.destination });
+        this._noiseHit({ t0, dur: s.dur * 0.9, vol: s.vol * s.noise, lp: s.lp || 3000, dest: bus });
       }
       // 消除类叠加高频"闪粉"层，听感更脆
       if (name === 'match' || name === 'star' || name === 'chest' || name === 'treasure') {
-        this._osc({ type: 'sine', f0: s.f1 * 2, f1: s.f1 * 2.6, dur: s.dur * 0.7, vol: s.vol * 0.3, atk: 0.002, t0, dest: ctx.destination });
+        this._osc({ type: 'sine', f0: s.f1 * 2, f1: s.f1 * 2.6, dur: s.dur * 0.7, vol: s.vol * 0.3, atk: 0.002, t0, dest: bus });
       }
     } catch (_) { /* 静默 */ }
   },
@@ -195,7 +212,7 @@ export const Sfx = {
           const ctx = self.ctx;
           if (!ctx || ctx.state !== 'running') return;
           const t0 = ctx.currentTime;
-          self._osc({ type: 'square', f0: f, f1: f, dur: 0.16, vol: 0.15, detune: 5, lp: 7000, t0, dest: ctx.destination });
+          self._osc({ type: 'square', f0: f, f1: f, dur: 0.16, vol: 0.15, detune: 5, lp: 7000, t0, dest: self._bus() || ctx.destination });
         } catch (_) { /* 静默 */ }
       }, dt);
     }
@@ -235,7 +252,7 @@ const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);   // MIDI 音高 → 频率
 const TRACKS = {
   // 首页/地图：C 大调，轻快蹦跳（无鼓，柔和）
   home: {
-    bpm: 108, drum: 0,
+    bpm: 108, drum: 0, pad: [48, 45, 41, 43],
     lead: [72, 0, 76, 0, 79, 0, 76, 0,  77, 0, 81, 0, 79, 76, 72, 0,
            72, 0, 76, 0, 79, 0, 84, 0,  83, 79, 76, 74, 72, 0, 0, 0],
     bass: [48, 0, 55, 0, 45, 0, 52, 0,  41, 0, 48, 0, 43, 0, 50, 0,
@@ -245,7 +262,7 @@ const TRACKS = {
   },
   // 战斗①：A 小调，紧凑推进
   battle: {
-    bpm: 138, drum: 1,
+    bpm: 138, drum: 1, pad: [45, 41, 43, 45],
     lead: [69, 0, 72, 76, 74, 0, 72, 0,  69, 0, 72, 76, 77, 76, 74, 72,
            69, 0, 72, 76, 79, 0, 77, 76,  74, 74, 72, 71, 69, 0, 0, 0],
     bass: [45, 45, 52, 45, 41, 41, 48, 41,  43, 43, 50, 43, 45, 45, 52, 45,
@@ -255,7 +272,7 @@ const TRACKS = {
   },
   // 战斗②：D 小调，更激进（切分更强）
   battle2: {
-    bpm: 150, drum: 1,
+    bpm: 150, drum: 1, pad: [50, 48, 46, 45],
     lead: [74, 0, 74, 77, 76, 0, 74, 0,  72, 0, 74, 76, 77, 0, 76, 74,
            74, 0, 74, 77, 81, 0, 79, 77,  76, 76, 74, 72, 74, 0, 0, 0],
     bass: [50, 50, 57, 50, 48, 48, 55, 48,  46, 46, 53, 46, 48, 48, 55, 48,
@@ -265,7 +282,7 @@ const TRACKS = {
   },
   // 战斗③：E 小调，旋律性/英雄感
   battle3: {
-    bpm: 132, drum: 1,
+    bpm: 132, drum: 1, pad: [52, 47, 45, 43],
     lead: [76, 0, 79, 0, 83, 0, 79, 0,  81, 0, 79, 76, 78, 76, 74, 0,
            76, 0, 79, 0, 84, 0, 83, 0,  81, 79, 78, 76, 79, 0, 76, 0],
     bass: [52, 52, 59, 52, 47, 47, 54, 47,  45, 45, 52, 45, 47, 47, 54, 47,
@@ -275,7 +292,7 @@ const TRACKS = {
   },
   // Boss：D 小调，低音压迫
   boss: {
-    bpm: 148, drum: 1,
+    bpm: 148, drum: 1, pad: [38, 36, 34, 33],
     lead: [62, 0, 65, 62, 69, 0, 65, 0,  62, 0, 65, 62, 70, 69, 67, 65,
            60, 0, 63, 60, 67, 0, 63, 0,  62, 62, 65, 67, 69, 0, 74, 0],
     bass: [38, 38, 45, 38, 38, 38, 45, 38,  36, 36, 43, 36, 36, 36, 43, 36,
@@ -311,11 +328,11 @@ export const Bgm = {
     if (!t) return;
     try {
       this.master = ctx.createGain();
-      this.master.gain.value = 0.5;
-      // 主输出低通软化，削弱方波刺耳感
+      this.master.gain.value = 0.42;
+      // 主输出低通软化，削弱方波刺耳感；再汇入全局压缩总线
       this.lp = ctx.createBiquadFilter();
       this.lp.type = 'lowpass'; this.lp.frequency.value = 7200; this.lp.Q.value = 0.6;
-      this.master.connect(this.lp).connect(ctx.destination);
+      this.master.connect(this.lp).connect(Sfx._bus() || ctx.destination);
     } catch (_) { return; }
     this.track = name;
     this.step = 0;
@@ -334,9 +351,18 @@ export const Bgm = {
         if (t.lead[i]) this._note(t.lead[i], time, this.stepDur * 0.9, 'square', 0.05);
         if (t.bass[i]) this._note(t.bass[i], time, this.stepDur * 0.95, 'triangle', 0.075);
         if (t.hat[i]) this._hat(time);
+        // 和声垫层：每小节一个持续三角波和弦（根音+五度），增厚听感
+        if (t.pad && i % 8 === 0) {
+          const root = t.pad[(i / 8) % t.pad.length];
+          if (root) {
+            this._note(root, time, this.stepDur * 7.6, 'triangle', 0.026);
+            this._note(root + 7, time, this.stepDur * 7.6, 'triangle', 0.018);
+          }
+        }
         if (t.drum) {
-          if (i % 8 === 0) this._kick(time);
+          if (i % 8 === 0 || i % 8 === 6) this._kick(time);
           if (i % 8 === 4) this._snare(time);
+          if (i % 8 === 7) this._snare(time, 0.02);   // 幽灵军鼓增加律动
         }
         this.step++;
         this.nextT += this.stepDur;
@@ -371,8 +397,8 @@ export const Bgm = {
     osc.connect(g).connect(this.master);
     osc.start(time); osc.stop(time + 0.15);
   },
-  _snare(time) {
-    Sfx._noiseHit({ t0: time, dur: 0.09, vol: 0.05, hp: 1600, dest: this.master });
+  _snare(time, vol = 0.05) {
+    Sfx._noiseHit({ t0: time, dur: 0.09, vol, hp: 1600, dest: this.master });
   },
 
   _teardown() {

@@ -475,10 +475,12 @@ const CH_POWER_START = { 5: 12500, 6: 16500, 7: 20500, 8: 25000 };
 function makeChapterLevels(chapter) {
   const n = chapter.id;
   const levels = [];
-  const enemyHp = Math.round(2000 * Math.pow(n, 1.6));
-  const enemyAtk = Math.round(150 * n);
-  const bossHp = Math.round(12000 * Math.pow(n, 1.3));
-  const bossAtk = 100 * n;
+  // V6 平衡：旧公式（2000*n^1.6 / 12000*n^1.3）后期血量远超玩家单回合输出预算，
+  // 导致高章不可通关；改为与"每回合≈平均ATK*0.5*(3~5消除)"匹配的可通关曲线。
+  const enemyHp = Math.round(420 * Math.pow(n, 1.5));
+  const enemyAtk = Math.round(40 * n);
+  const bossHp = Math.round(900 * Math.pow(n, 1.5));
+  const bossAtk = Math.round(35 * n);
   const names = CH_ENEMY_NAMES[n];
   const unlock = CH_UNLOCK[n];
   const normalGold = 50 + n * 20;            // 普通关金币 50-200 随章节递增
