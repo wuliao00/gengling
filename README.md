@@ -9,7 +9,7 @@
 ![audio](https://img.shields.io/badge/audio-WebAudio%20%E5%85%A8%E5%90%88%E6%88%90-blueviolet)
 ![deps](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)
 ![apk](https://img.shields.io/badge/APK-GitHub%20Actions%20%E4%BA%91%E7%AB%AF%E6%9E%84%E5%BB%BA-blue)
-![license](https://img.shields.io/badge/license-%E6%9C%AA%E9%99%84%EF%BC%88%E7%A7%81%E6%9C%89%EF%BC%89-lightgrey)
+![license](https://img.shields.io/badge/license-%E6%9C%AA%E9%99%84%C2%B7%E4%BF%9D%E7%95%99%E6%89%80%E6%9C%89%E6%9D%83%E5%88%A9-lightgrey)
 
 ---
 
@@ -77,8 +77,8 @@ gengling/
 - **纯客户端**：无后端、无服务器、无网络请求，存档存于本地（网页 `localStorage` / APK WebView DOM Storage）。
 - **无密钥**：仓库不含任何 token / 私钥 / API key。
 - **WebView 加固**：禁用 `file://` 与 `content://` 访问、不暴露 JS 接口，仅通过 `WebViewAssetLoader` 的虚拟 https 域加载包内资源。
-- 私有仓库的 Dependabot / 代码扫描 / 密钥扫描属 GitHub 付费（GHAS）功能，免费版不可用；本仓库零运行时依赖，无供应链攻击面。
+- 仓库已**公开**，GitHub 免费安全扫描（secret scanning / Dependabot / CodeQL）已启用；本仓库零运行时依赖，无供应链攻击面。
 
 ## 📄 许可
 
-当前为**私有仓库，未附开源许可证**。如需公开或商用分发，请先选择合适的许可证。
+当前**未附开源许可证**（默认保留所有权利）。仓库公开仅供展示与存档；如需他人复用或商用分发，请另行选择合适的许可证。
